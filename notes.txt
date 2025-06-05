@@ -11,6 +11,8 @@ cd maskdino/modeling/pixel_decoder/ops
 sh make.sh
 cd ../../../..
 
+Run training:
+python train_net_3lc.py --config-file dino-config-simplified.yaml --num-gpus 1
 
 MODEL.ROI_HEADS.NUM_CLASSES: 1
 MODEL.SEM_SEG_HEAD.NUM_CLASSES: 1
