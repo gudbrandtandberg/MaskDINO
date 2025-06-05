@@ -68,34 +68,56 @@ import weakref
 ### 3LC START ###
 from tlc.integration.detectron2 import register_coco_instances, MetricsCollectionHook, DetectronMetricsCollectionHook
 import tlc
+TEST_DATASET_NAME = "BALLOONS_TEST"
+TRAIN_DATASET_NAME = "BALLOONS_TRAIN"
+PROJECT_NAME = "MASKDINO_BALLOONS"
+RUN_NAME = "Train Balloon Model (DEBUG)"
 
 register_coco_instances(
-    name="BALLOONS_TRAIN",
+    name=TRAIN_DATASET_NAME,
     metadata={},
     json_file="C:/Project/tlc-monorepo/tests/test_data/data/balloons/train/train-annotations.json",
     image_root=None,  # images are in the same folder as the json file
-    project_name="MASKDINO_BALLOONS",
+    project_name=PROJECT_NAME,
     task="segment",
 )
 
 register_coco_instances(
-    name="BALLOONS_TEST",
+    name=TEST_DATASET_NAME,
     metadata={},
     json_file="C:/Project/tlc-monorepo/tests/test_data/data/balloons/val/val-annotations.json",
     image_root=None,  # images are in the same folder as the json file
-    project_name="MASKDINO_BALLOONS",
+    project_name=PROJECT_NAME,
     task="segment",
 )
 
-dataset_metadata = MetadataCatalog.get("BALLOONS_TRAIN")
-dataset_dicts = DatasetCatalog.get("BALLOONS_TRAIN")
-
-tlc.TableIndexingTable.instance().stop()
-tlc.RunIndexingTable.instance().stop()
-tlc.ConfigIndexingTable.instance().stop()
+# Get the metadata for the test dataset for later use
+dataset_dicts = DatasetCatalog.get(TEST_DATASET_NAME)
+dataset_metadata = MetadataCatalog.get(TEST_DATASET_NAME)
 
 ### 3LC END ###
 
+### PLAIN DETECTRON2 ALTERNATIVE ###
+# from detectron2.data.datasets.coco import register_coco_instances
+
+# register_coco_instances(
+#     "BALLOONS_TRAIN",
+#     {},
+#     "C:/Project/tlc-monorepo/tests/test_data/data/balloons/train/train-annotations.json",
+#     "C:/Project/tlc-monorepo/tests/test_data/data/balloons/train",  # images are in the same folder as the json file
+#     # project_name="MASKDINO_BALLOONS",
+#     # task="segment",
+# )
+
+# register_coco_instances(
+#     "BALLOONS_TEST",
+#     {},
+#     "C:/Project/tlc-monorepo/tests/test_data/data/balloons/val/val-annotations.json",
+#     None,  # images are in the same folder as the json file
+#     # project_name="MASKDINO_BALLOONS",
+#     # task="segment",
+# )
+### PLAIN DETECTRON2 ALTERNATIVE ###
 class Trainer(DefaultTrainer):
     """
     Extension of the Trainer class adapted to MaskFormer.
@@ -381,19 +403,31 @@ def setup(args):
 
 ### 3LC START ###
 def register_3lc_hooks(trainer, cfg):
+
+    # Collect embeddings from the following layer(s):
+    layer_indices = [
+        226,  # sem_seg_head.pixel_decoder.transformer.encoder.layers.5
+    ]
+
+    embeddings_metrics_collector = tlc.EmbeddingsMetricsCollector(layers=layer_indices)
+    predictor = tlc.Predictor(trainer.model, layers=layer_indices)
+
     bounding_box_metrics_collector = tlc.BoundingBoxMetricsCollector(
         classes=dataset_metadata.thing_classes,
         label_mapping=dataset_metadata.thing_dataset_id_to_contiguous_id,
         compute_derived_metrics=False,
         save_segmentations=True,
     )
-
+    
     metrics_collection_hook = MetricsCollectionHook(
-        dataset_name="BALLOONS_TEST",
-        metrics_collectors=[bounding_box_metrics_collector],
-        collect_metrics_before_train=True,
+        dataset_name=TEST_DATASET_NAME,
+        metrics_collectors=[bounding_box_metrics_collector, embeddings_metrics_collector],
+        predictor=predictor,
+        collect_metrics_before_train=False,
+        collection_frequency=50,
+        collection_start_iteration=50,
         collect_metrics_after_train=True,
-        metric_collection_batch_size=cfg.SOLVER.IMS_PER_BATCH,
+        metric_collection_batch_size=1,
     )
 
     d2_metrics_collection_hook = DetectronMetricsCollectionHook(
@@ -425,19 +459,22 @@ def main(args):
     trainer = Trainer(cfg)
 
     ### 3LC START ###
-    run = tlc.init(project_name="MASKDINO_BALLOONS", run_name="Train Balloon Segmentation Model")
+    run = tlc.init(project_name=PROJECT_NAME, run_name=RUN_NAME)
     register_3lc_hooks(trainer, cfg)
     ### 3LC END ###
 
     trainer.resume_or_load(resume=args.resume)
-    train_results = trainer.train()
+    trainer.train()
 
     ### 3LC START ###
-    run.reduce_embeddings_by_foreign_table_url()
+    val_table_url = dataset_metadata.get("latest_tlc_table_url")
+
+    run.reduce_embeddings_by_foreign_table_url(
+        val_table_url,
+        method="pacmap",
+        n_components=2,
+    )
     ### 3LC END ###
-
-    return train_results
-
 
 if __name__ == "__main__":
     parser = default_argument_parser()
