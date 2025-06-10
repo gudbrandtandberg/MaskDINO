@@ -423,7 +423,7 @@ def register_3lc_hooks(trainer, cfg):
         dataset_name=TEST_DATASET_NAME,
         metrics_collectors=[bounding_box_metrics_collector, embeddings_metrics_collector],
         predictor=predictor,
-        collect_metrics_before_train=False,
+        collect_metrics_before_train=True,
         collection_frequency=50,
         collection_start_iteration=50,
         collect_metrics_after_train=True,
